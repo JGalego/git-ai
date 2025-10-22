@@ -6,6 +6,7 @@ This module provides the command-line interface entry point for the git-ai exten
 """
 
 import argparse
+import subprocess
 import sys
 
 from .core import GitAI
@@ -65,8 +66,8 @@ For more information, visit: https://github.com/jgalego/git-ai
     print(help_text.strip())
 
 
-def main():
-    """Main entry point for the git-ai command"""
+def create_parser():
+    """Create and configure the argument parser"""
     parser = argparse.ArgumentParser(
         description="Git extension for tracking AI-made changes", prog="git-ai"
     )
@@ -100,6 +101,11 @@ def main():
         "-n", "--max-count", type=int, help="Limit number of commits"
     )
 
+    return parser, subparsers
+
+
+def add_visualization_commands(subparsers):
+    """Add visualization-related commands to the parser"""
     # Tree command
     tree_parser = subparsers.add_parser(
         "tree", help="Show commit tree with AI sub-branches"
@@ -117,6 +123,23 @@ def main():
     # Status command
     subparsers.add_parser("status", help="Show AI tracking status")
 
+    # Branches command
+    branches_parser = subparsers.add_parser(
+        "branches", help="Show AI branches structure"
+    )
+    branches_parser.add_argument(
+        "--format",
+        choices=["ascii", "unicode"],
+        default="unicode",
+        help="Display format",
+    )
+
+    # Stats command
+    subparsers.add_parser("stats", help="Show AI contribution statistics")
+
+
+def add_management_commands(subparsers):
+    """Add management-related commands to the parser"""
     # Config command
     config_parser = subparsers.add_parser("config", help="Configure AI tracking")
     config_parser.add_argument(
@@ -139,23 +162,12 @@ def main():
         help="Merge strategy",
     )
 
-    # Branches command
-    branches_parser = subparsers.add_parser(
-        "branches", help="Show AI branches structure"
-    )
-    branches_parser.add_argument(
-        "--format",
-        choices=["ascii", "unicode"],
-        default="unicode",
-        help="Display format",
-    )
-
-    # Stats command
-    subparsers.add_parser("stats", help="Show AI contribution statistics")
-
     # Help command
     subparsers.add_parser("help", help="Show detailed help information")
 
+
+def add_remote_commands(subparsers):
+    """Add remote synchronization commands to the parser"""
     # Remote commands
     setup_parser = subparsers.add_parser("setup", help="Setup remote sync")
     setup_parser.add_argument("remote", nargs="?", default="origin", help="Remote name")
@@ -177,6 +189,79 @@ def main():
         "remote", nargs="?", default="origin", help="Remote name"
     )
 
+
+def execute_core_commands(git_ai, args):
+    """Execute core git-ai commands"""
+    if args.command == "init":
+        git_ai.init()
+    elif args.command == "track":
+        git_ai.track(args.ai_system)
+    elif args.command == "commit":
+        git_ai.commit(args.message, args.ai_prompt, args.ai_model, args.files)
+    elif args.command == "status":
+        git_ai.show_status()
+    else:
+        return False
+    return True
+
+
+def execute_visualization_commands(git_ai, args):
+    """Execute visualization commands"""
+    if args.command == "log":
+        git_ai.show_log(args.ai_only, args.max_count)
+    elif args.command == "tree":
+        git_ai.show_tree(args.format, args.max_commits, args.ai_only)
+    elif args.command == "branches":
+        git_ai.show_branches(args.format)
+    elif args.command == "stats":
+        git_ai.show_statistics()
+    else:
+        return False
+    return True
+
+
+def execute_management_commands(git_ai, args):
+    """Execute management commands"""
+    if args.command == "config":
+        set_key, set_value = (
+            (args.set[0], args.set[1]) if args.set else (None, None)
+        )
+        git_ai.show_config(args.list, set_key, set_value)
+    elif args.command == "merge":
+        git_ai.merge_ai_branch(args.ai_branch, args.target, args.strategy)
+    elif args.command == "help":
+        show_detailed_help()
+    else:
+        return False
+    return True
+
+
+def execute_remote_commands(git_ai, args):
+    """Execute remote synchronization commands"""
+    if args.command == "setup":
+        git_ai.setup_remote(args.remote)
+    elif args.command == "push":
+        git_ai.push_ai_data(args.remote, args.force)
+    elif args.command == "pull":
+        git_ai.pull_ai_data(args.remote)
+    elif args.command == "sync":
+        git_ai.sync_ai_data(args.remote)
+    elif args.command == "remote-status":
+        git_ai.show_remote_status(args.remote)
+    else:
+        return False
+    return True
+
+
+def main():
+    """Main entry point for the git-ai command"""
+    parser, subparsers = create_parser()
+
+    # Add command groups
+    add_visualization_commands(subparsers)
+    add_management_commands(subparsers)
+    add_remote_commands(subparsers)
+
     # Parse arguments
     args = parser.parse_args()
 
@@ -187,46 +272,21 @@ def main():
     try:
         git_ai = GitAI()
 
-        if args.command == "init":
-            git_ai.init()
-        elif args.command == "track":
-            git_ai.track(args.ai_system)
-        elif args.command == "commit":
-            git_ai.commit(args.message, args.ai_prompt, args.ai_model, args.files)
-        elif args.command == "log":
-            git_ai.show_log(args.ai_only, args.max_count)
-        elif args.command == "tree":
-            git_ai.show_tree(args.format, args.max_commits, args.ai_only)
-        elif args.command == "status":
-            git_ai.show_status()
-        elif args.command == "config":
-            set_key, set_value = (
-                (args.set[0], args.set[1]) if args.set else (None, None)
-            )
-            git_ai.show_config(args.list, set_key, set_value)
-        elif args.command == "merge":
-            git_ai.merge_ai_branch(args.ai_branch, args.target, args.strategy)
-        elif args.command == "branches":
-            git_ai.show_branches(args.format)
-        elif args.command == "stats":
-            git_ai.show_statistics()
-        elif args.command == "help":
-            show_detailed_help()
-        elif args.command == "setup":
-            git_ai.setup_remote(args.remote)
-        elif args.command == "push":
-            git_ai.push_ai_data(args.remote, args.force)
-        elif args.command == "pull":
-            git_ai.pull_ai_data(args.remote)
-        elif args.command == "sync":
-            git_ai.sync_ai_data(args.remote)
-        elif args.command == "remote-status":
-            git_ai.show_remote_status(args.remote)
-        else:
-            print(f"Unknown command: {args.command}")
-            parser.print_help()
+        # Execute commands by category
+        if execute_core_commands(git_ai, args):
+            return
+        if execute_visualization_commands(git_ai, args):
+            return
+        if execute_management_commands(git_ai, args):
+            return
+        if execute_remote_commands(git_ai, args):
+            return
 
-    except Exception as e:
+        # Unknown command
+        print(f"Unknown command: {args.command}")
+        parser.print_help()
+
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
         print(f"Error: {e}")
         sys.exit(1)
 

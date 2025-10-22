@@ -8,8 +8,20 @@ including metadata storage, branch management, and integration with git workflow
 
 import json
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class AIMetadataParams:
+    """Parameters for creating AI metadata"""
+    ai_system: Dict[str, Any]
+    current_session: str
+    current_branch: str
+    ai_branch_name: str
+    ai_prompt: Optional[str] = None
+    ai_model: Optional[str] = None
 
 
 class AIChangeTracker:
@@ -20,6 +32,46 @@ class AIChangeTracker:
         self.repo_root = git_ai_instance.repo_root
         self.ai_config_dir = git_ai_instance.ai_config_dir
 
+    def _prepare_ai_commit_environment(self, ai_system: Dict[str, Any], files: Optional[List[str]]):
+        """Prepare the environment for creating an AI commit"""
+        # Get current branch
+        current_branch_result = self.git_ai.run_git_command(["branch", "--show-current"])
+        current_branch = current_branch_result.stdout.strip()
+
+        # Create AI branch if it doesn't exist
+        ai_branch_name = f"{ai_system['branch_prefix']}/{current_branch}"
+        self._ensure_ai_branch(ai_branch_name, current_branch)
+
+        # Switch to AI branch
+        self.git_ai.run_git_command(["checkout", ai_branch_name])
+
+        # Add files if specified, otherwise add all changed files
+        if files:
+            for file in files:
+                self.git_ai.run_git_command(["add", file])
+        else:
+            self.git_ai.run_git_command(["add", "."])
+
+        return current_branch, ai_branch_name
+
+    def _create_ai_metadata(self, params: AIMetadataParams) -> Dict[str, Any]:
+        """Create AI metadata dictionary"""
+        ai_metadata = {
+            "ai_system": params.ai_system["name"],
+            "ai_session_id": params.current_session,
+            "timestamp": datetime.now().isoformat(),
+            "commit_type": "ai_generated",
+            "parent_branch": params.current_branch,
+            "ai_branch": params.ai_branch_name,
+        }
+
+        if params.ai_prompt:
+            ai_metadata["ai_prompt"] = params.ai_prompt
+        if params.ai_model:
+            ai_metadata["ai_model"] = params.ai_model
+
+        return ai_metadata
+
     def create_ai_commit(
         self,
         message: str,
@@ -28,63 +80,40 @@ class AIChangeTracker:
         files: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Create a commit with AI metadata"""
-        config = self.git_ai._load_config()
+        config = self.git_ai.load_config()
 
         if "current_session" not in config:
-            raise Exception(
+            raise ValueError(
                 "No active AI session. Use 'git ai track <ai-system>' first."
             )
 
         current_session = config["current_session"]
         ai_system = config["ai_systems"][current_session]
 
-        # Get current branch
-        current_branch_result = self.git_ai._run_git_command(
-            ["branch", "--show-current"]
-        )
-        current_branch = current_branch_result.stdout.strip()
-
-        # Create AI branch if it doesn't exist
-        ai_branch_name = f"{ai_system['branch_prefix']}/{current_branch}"
-        self._ensure_ai_branch(ai_branch_name, current_branch)
-
-        # Switch to AI branch
-        self.git_ai._run_git_command(["checkout", ai_branch_name])
-
-        # Add files if specified, otherwise add all changed files
-        if files:
-            for file in files:
-                self.git_ai._run_git_command(["add", file])
-        else:
-            self.git_ai._run_git_command(["add", "."])
+        # Prepare commit environment
+        current_branch, ai_branch_name = self._prepare_ai_commit_environment(ai_system, files)
 
         # Create commit
-        commit_result = self.git_ai._run_git_command(["commit", "-m", message])
+        commit_result = self.git_ai.run_git_command(["commit", "-m", message])
 
         if commit_result.returncode != 0:
             print(f"Error creating commit: {commit_result.stderr}")
             return None
 
         # Get the commit hash
-        commit_hash_result = self.git_ai._run_git_command(["rev-parse", "HEAD"])
+        commit_hash_result = self.git_ai.run_git_command(["rev-parse", "HEAD"])
         commit_hash = commit_hash_result.stdout.strip()
 
-        # Add AI metadata as git notes
-        ai_metadata = {
-            "ai_system": ai_system["name"],
-            "ai_session_id": current_session,
-            "timestamp": datetime.now().isoformat(),
-            "commit_type": "ai_generated",
-            "parent_branch": current_branch,
-            "ai_branch": ai_branch_name,
-        }
-
-        if ai_prompt:
-            ai_metadata["ai_prompt"] = ai_prompt
-        if ai_model:
-            ai_metadata["ai_model"] = ai_model
-
-        # Store metadata in git notes
+        # Create and store AI metadata
+        metadata_params = AIMetadataParams(
+            ai_system=ai_system,
+            current_session=current_session,
+            current_branch=current_branch,
+            ai_branch_name=ai_branch_name,
+            ai_prompt=ai_prompt,
+            ai_model=ai_model
+        )
+        ai_metadata = self._create_ai_metadata(metadata_params)
         self._add_ai_notes(commit_hash, ai_metadata)
 
         # Update tracking statistics
@@ -100,14 +129,14 @@ class AIChangeTracker:
     def _ensure_ai_branch(self, ai_branch_name: str, parent_branch: str):
         """Ensure an AI branch exists, create if necessary"""
         # Check if branch exists
-        branch_check = self.git_ai._run_git_command(
+        branch_check = self.git_ai.run_git_command(
             ["branch", "--list", ai_branch_name]
         )
 
         if not branch_check.stdout.strip():
             # Branch doesn't exist, create it
             print(f"Creating AI branch: {ai_branch_name}")
-            self.git_ai._run_git_command(
+            self.git_ai.run_git_command(
                 ["checkout", "-b", ai_branch_name, parent_branch]
             )
         else:
@@ -133,7 +162,7 @@ class AIChangeTracker:
 
     def _update_ai_stats(self, session_id: str, commit_hash: str):
         """Update AI session statistics"""
-        config = self.git_ai._load_config()
+        config = self.git_ai.load_config()
 
         if "stats" not in config["ai_systems"][session_id]:
             config["ai_systems"][session_id]["stats"] = {
@@ -146,19 +175,11 @@ class AIChangeTracker:
             {"hash": commit_hash, "timestamp": datetime.now().isoformat()}
         )
 
-        self.git_ai._save_config(config)
+        self.git_ai.save_config(config)
 
     def get_ai_commit_metadata(self, commit_hash: str) -> Optional[Dict[str, Any]]:
         """Retrieve AI metadata for a commit"""
-        try:
-            notes_result = self.git_ai._run_git_command(
-                ["notes", "--ref=ai", "show", commit_hash]
-            )
-            if notes_result.returncode == 0:
-                return json.loads(notes_result.stdout)
-        except:
-            pass
-        return None
+        return self.git_ai.get_ai_commit_metadata(commit_hash)
 
     def list_ai_commits(
         self, branch: Optional[str] = None, limit: Optional[int] = None
@@ -173,7 +194,7 @@ class AIChangeTracker:
         if limit:
             log_cmd.extend(["-n", str(limit)])
 
-        log_result = self.git_ai._run_git_command(log_cmd)
+        log_result = self.git_ai.run_git_command(log_cmd)
 
         if log_result.returncode != 0:
             return []
@@ -212,36 +233,36 @@ class AIChangeTracker:
         print(f"Merging AI branch '{ai_branch}' into '{target_branch}'...")
 
         # Switch to target branch
-        self.git_ai._run_git_command(["checkout", target_branch])
+        self.git_ai.run_git_command(["checkout", target_branch])
 
         merge_result = None
         if strategy == "merge":
             # Standard merge with commit message indicating AI origin
             merge_message = f"Merge AI changes from {ai_branch}"
-            merge_result = self.git_ai._run_git_command(
+            merge_result = self.git_ai.run_git_command(
                 ["merge", ai_branch, "-m", merge_message]
             )
         elif strategy == "squash":
             # Squash merge
-            merge_result = self.git_ai._run_git_command(
+            merge_result = self.git_ai.run_git_command(
                 ["merge", "--squash", ai_branch]
             )
             if merge_result.returncode == 0:
                 # Create squash commit
                 squash_message = f"AI changes from {ai_branch} (squashed)"
-                commit_result = self.git_ai._run_git_command(
+                commit_result = self.git_ai.run_git_command(
                     ["commit", "-m", squash_message]
                 )
                 merge_result = commit_result
 
         if strategy not in ["merge", "squash"]:
-            raise Exception(f"Unknown merge strategy: {strategy}")
+            raise ValueError(f"Unknown merge strategy: {strategy}")
 
         if merge_result and merge_result.returncode == 0:
             print(f"✓ Successfully merged {ai_branch} into {target_branch}")
 
             # Add merge metadata
-            commit_hash_result = self.git_ai._run_git_command(["rev-parse", "HEAD"])
+            commit_hash_result = self.git_ai.run_git_command(["rev-parse", "HEAD"])
             commit_hash = commit_hash_result.stdout.strip()
 
             merge_metadata = {
@@ -264,13 +285,13 @@ class AIChangeTracker:
 
     def get_ai_status(self) -> Dict[str, Any]:
         """Get current AI tracking status"""
-        config = self.git_ai._load_config()
+        config = self.git_ai.load_config()
 
         if not config:
             return {"initialized": False}
 
         # Get current branch
-        current_branch_result = self.git_ai._run_git_command(
+        current_branch_result = self.git_ai.run_git_command(
             ["branch", "--show-current"]
         )
         current_branch = current_branch_result.stdout.strip()
@@ -286,7 +307,7 @@ class AIChangeTracker:
             active_ai_system = config["ai_systems"][active_session]
 
         # Count AI branches
-        branches_result = self.git_ai._run_git_command(["branch", "-a"])
+        branches_result = self.git_ai.run_git_command(["branch", "-a"])
         ai_branches = [
             b.strip()
             for b in branches_result.stdout.split("\n")

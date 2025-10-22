@@ -6,9 +6,21 @@ This module provides enhanced visualization of commit trees showing AI contribut
 as sub-nodes and sub-branches alongside human-made commits.
 """
 
-import json
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
+
+@dataclass
+class CommitInfo:
+    """Container for commit information"""
+    graph_part: str
+    commit_hash: str
+    subject: str
+    author: str
+    date: str
+    ai_metadata: Optional[Dict[str, Any]]
+    parents: List[str]
 
 
 class TreeVisualizer:
@@ -42,18 +54,8 @@ class TreeVisualizer:
             },
         }
 
-    def show_ai_tree(
-        self,
-        branch: Optional[str] = None,
-        format_type: str = "unicode",
-        max_commits: int = 20,
-        show_ai_only: bool = False,
-    ) -> str:
-        """Display commit tree with AI annotations"""
-
-        chars = self.tree_chars[format_type]
-
-        # Get commit history with graph
+    def _build_log_command(self, branch: Optional[str], max_commits: int) -> List[str]:
+        """Build git log command for tree visualization"""
         log_cmd = [
             "log",
             "--graph",
@@ -67,60 +69,96 @@ class TreeVisualizer:
         else:
             log_cmd.append("--all")
 
-        log_result = self.git_ai._run_git_command(log_cmd)
+        return log_cmd
+
+    def _process_commit_line(
+        self, line: str, chars: Dict[str, str], show_ai_only: bool
+    ) -> Optional[str]:
+        """Process a single commit line from git log output"""
+        if not line.strip():
+            return None
+
+        # Extract git graph characters and commit info
+        graph_part, commit_part = self._split_graph_and_commit(line)
+
+        if not commit_part:
+            return None
+
+        commit_info_parts = commit_part.split("|")
+        if len(commit_info_parts) < 4:
+            return None
+
+        commit_hash, subject, author, date = commit_info_parts[:4]
+        parents = commit_info_parts[4].split() if len(commit_info_parts) > 4 else []
+
+        # Check for AI metadata
+        ai_metadata = self._get_ai_metadata(commit_hash)
+
+        # Skip non-AI commits if show_ai_only is True
+        if show_ai_only and not ai_metadata:
+            return None
+
+        # Format the line with AI annotations
+        commit_info = CommitInfo(
+            graph_part=graph_part,
+            commit_hash=commit_hash,
+            subject=subject,
+            author=author,
+            date=date,
+            ai_metadata=ai_metadata,
+            parents=parents,
+        )
+        return self._format_commit_line(commit_info, chars)
+
+    def _process_tree_lines(
+        self, lines: List[str], chars: Dict[str, str], show_ai_only: bool
+    ) -> List[str]:
+        """Process all lines from git log output to build tree"""
+        tree_output = []
+
+        for line in lines:
+            formatted_line = self._process_commit_line(line, chars, show_ai_only)
+            if formatted_line:
+                tree_output.append(formatted_line)
+
+                # Add AI sub-branches if this commit has AI children
+                commit_hash = self._extract_commit_hash(line)
+                if commit_hash:
+                    ai_children = self._get_ai_children(commit_hash)
+                    if ai_children:
+                        graph_part, _ = self._split_graph_and_commit(line)
+                        for child in ai_children:
+                            child_line = self._format_ai_child_line(child, chars, graph_part)
+                            tree_output.append(child_line)
+
+        return tree_output
+
+    def show_ai_tree(
+        self,
+        branch: Optional[str] = None,
+        format_type: str = "unicode",
+        max_commits: int = 20,
+        show_ai_only: bool = False,
+    ) -> str:
+        """Display commit tree with AI annotations"""
+        chars = self.tree_chars[format_type]
+
+        # Get commit history with graph
+        log_cmd = self._build_log_command(branch, max_commits)
+        log_result = self.git_ai.run_git_command(log_cmd)
 
         if log_result.returncode != 0:
             return "Error retrieving commit history"
 
         lines = log_result.stdout.strip().split("\n")
-        tree_output = []
-
-        for line in lines:
-            if not line.strip():
-                continue
-
-            # Extract git graph characters and commit info
-            graph_part, commit_part = self._split_graph_and_commit(line)
-
-            if not commit_part:
-                continue
-
-            commit_info = commit_part.split("|")
-            if len(commit_info) < 4:
-                continue
-
-            commit_hash, subject, author, date = commit_info[:4]
-            parents = commit_info[4].split() if len(commit_info) > 4 else []
-
-            # Check for AI metadata
-            ai_metadata = self._get_ai_metadata(commit_hash)
-
-            # Skip non-AI commits if show_ai_only is True
-            if show_ai_only and not ai_metadata:
-                continue
-
-            # Format the line with AI annotations
-            formatted_line = self._format_commit_line(
-                graph_part,
-                commit_hash,
-                subject,
-                author,
-                date,
-                ai_metadata,
-                chars,
-                parents,
-            )
-
-            tree_output.append(formatted_line)
-
-            # Add AI sub-branches if this commit has AI children
-            ai_children = self._get_ai_children(commit_hash)
-            if ai_children:
-                for child in ai_children:
-                    child_line = self._format_ai_child_line(child, chars, graph_part)
-                    tree_output.append(child_line)
+        tree_output = self._process_tree_lines(lines, chars, show_ai_only)
 
         return "\n".join(tree_output)
+
+    def _extract_commit_hash(self, line: str) -> Optional[str]:
+        """Extract commit hash from git log line"""
+        match = re.search(r"([a-f0-9]{40})", line)
+        return match.group(1) if match else None
 
     def _split_graph_and_commit(self, line: str) -> Tuple[str, str]:
         """Split git log line into graph part and commit info"""
@@ -134,20 +172,12 @@ class TreeVisualizer:
 
     def _get_ai_metadata(self, commit_hash: str) -> Optional[Dict[str, Any]]:
         """Get AI metadata for a commit"""
-        try:
-            notes_result = self.git_ai._run_git_command(
-                ["notes", "--ref=ai", "show", commit_hash]
-            )
-            if notes_result.returncode == 0:
-                return json.loads(notes_result.stdout)
-        except:
-            pass
-        return None
+        return self.git_ai.get_ai_commit_metadata(commit_hash)
 
     def _get_ai_children(self, commit_hash: str) -> List[Dict[str, Any]]:
         """Get AI commits that are direct children of this commit"""
         # Find commits that have this commit as parent
-        children_result = self.git_ai._run_git_command(
+        children_result = self.git_ai.run_git_command(
             ["log", "--format=%H|%P", "--all"]
         )
 
@@ -168,7 +198,7 @@ class TreeVisualizer:
                 ai_metadata = self._get_ai_metadata(child_hash)
                 if ai_metadata:
                     # Get commit details
-                    commit_result = self.git_ai._run_git_command(
+                    commit_result = self.git_ai.run_git_command(
                         ["log", "-1", "--format=%s|%an|%ad", "--date=short", child_hash]
                     )
                     if commit_result.returncode == 0:
@@ -188,25 +218,19 @@ class TreeVisualizer:
 
     def _format_commit_line(
         self,
-        graph_part: str,
-        commit_hash: str,
-        subject: str,
-        author: str,
-        date: str,
-        ai_metadata: Optional[Dict[str, Any]],
+        commit_info: CommitInfo,
         chars: Dict[str, str],
-        parents: List[str],
     ) -> str:
         """Format a single commit line with AI annotations"""
         # Note: parents parameter not currently used but kept for future enhancements
-        _ = parents  # Suppress unused variable warning
+        _ = commit_info.parents  # Suppress unused variable warning
 
         # Determine commit type
-        if ai_metadata:
-            if ai_metadata.get("commit_type") == "ai_generated":
+        if commit_info.ai_metadata:
+            if commit_info.ai_metadata.get("commit_type") == "ai_generated":
                 marker = chars["ai_marker"]
                 color_code = "\033[94m"  # Blue for AI commits
-            elif ai_metadata.get("merge_type") == "ai_to_human":
+            elif commit_info.ai_metadata.get("merge_type") == "ai_to_human":
                 marker = chars["merge_marker"]
                 color_code = "\033[95m"  # Magenta for AI merges
             else:
@@ -219,25 +243,26 @@ class TreeVisualizer:
         reset_color = "\033[0m"
 
         # Format hash (short version)
-        short_hash = commit_hash[:8]
+        short_hash = commit_info.commit_hash[:8]
 
         # Build the formatted line
         formatted_line = (
-            f"{graph_part}{marker} {color_code}{short_hash}{reset_color} {subject}"
+            f"{commit_info.graph_part}{marker} {color_code}{short_hash}{reset_color} "
+            f"{commit_info.subject}"
         )
 
         # Add author and date
-        formatted_line += f" \033[90m({author}, {date})\033[0m"
+        formatted_line += f" \033[90m({commit_info.author}, {commit_info.date})\033[0m"
 
         # Add AI-specific information
-        if ai_metadata:
+        if commit_info.ai_metadata:
             ai_info = []
-            if "ai_system" in ai_metadata:
-                ai_info.append(f"AI: {ai_metadata['ai_system']}")
-            if "ai_model" in ai_metadata:
-                ai_info.append(f"Model: {ai_metadata['ai_model']}")
-            if "ai_branch" in ai_metadata:
-                ai_info.append(f"Branch: {ai_metadata['ai_branch']}")
+            if "ai_system" in commit_info.ai_metadata:
+                ai_info.append(f"AI: {commit_info.ai_metadata['ai_system']}")
+            if "ai_model" in commit_info.ai_metadata:
+                ai_info.append(f"Model: {commit_info.ai_metadata['ai_model']}")
+            if "ai_branch" in commit_info.ai_metadata:
+                ai_info.append(f"Branch: {commit_info.ai_metadata['ai_branch']}")
 
             if ai_info:
                 formatted_line += f" \033[93m[{', '.join(ai_info)}]\033[0m"
@@ -265,17 +290,8 @@ class TreeVisualizer:
             f"{subject} \033[93m[{ai_system}]\033[0m"
         )
 
-    def show_ai_branches(self, format_type: str = "unicode") -> str:
-        """Show all AI branches and their relationships"""
-
-        chars = self.tree_chars[format_type]
-
-        # Get all branches
-        branches_result = self.git_ai._run_git_command(["branch", "-a"])
-
-        if branches_result.returncode != 0:
-            return "Error retrieving branches"
-
+    def _categorize_branches(self, branches_result) -> Tuple[List[str], List[str]]:
+        """Categorize branches into AI and human branches"""
         ai_branches = []
         human_branches = []
 
@@ -286,11 +302,14 @@ class TreeVisualizer:
             elif not branch.startswith("remotes/") and branch:
                 human_branches.append(branch)
 
-        output = []
-        output.append("Branch Structure:")
-        output.append("")
+        return ai_branches, human_branches
 
-        # Show human branches
+    def _format_human_branches(
+        self, human_branches: List[str], ai_branches: List[str], chars: Dict[str, str]
+    ) -> List[str]:
+        """Format human branches with their related AI branches"""
+        output = []
+
         for i, branch in enumerate(human_branches):
             is_last = i == len(human_branches) - 1 and not ai_branches
             prefix = chars["last_branch"] if is_last else chars["branch"]
@@ -304,6 +323,28 @@ class TreeVisualizer:
                     chars["last_branch"] if is_last_ai else chars["branch"]
                 )
                 output.append(f"{ai_prefix} {chars['ai_marker']} {ai_branch}")
+
+        return output
+
+    def show_ai_branches(self, format_type: str = "unicode") -> str:
+        """Show all AI branches and their relationships"""
+        chars = self.tree_chars[format_type]
+
+        # Get all branches
+        branches_result = self.git_ai.run_git_command(["branch", "-a"])
+
+        if branches_result.returncode != 0:
+            return "Error retrieving branches"
+
+        ai_branches, human_branches = self._categorize_branches(branches_result)
+
+        output = []
+        output.append("Branch Structure:")
+        output.append("")
+
+        # Show human branches with their AI branches
+        human_output = self._format_human_branches(human_branches, ai_branches, chars)
+        output.extend(human_output)
 
         # Show orphaned AI branches
         orphaned_ai = [
@@ -322,9 +363,54 @@ class TreeVisualizer:
 
         return "\n".join(output)
 
+    def _format_ai_system_stats(
+        self, session_id: str, ai_system: Dict[str, Any]
+    ) -> Tuple[List[str], int]:
+        """Format statistics for a single AI system"""
+        output = []
+        output.append(f"AI System: {ai_system['name']}")
+        output.append(f"  Session ID: {session_id}")
+        output.append(f"  Created: {ai_system['created'][:10]}")
+
+        stats = ai_system.get("stats", {})
+        commit_count = stats.get("total_commits", 0)
+        output.append(f"  Total Commits: {commit_count}")
+
+        if commit_count > 0:
+            recent_commits = stats.get("commits", [])[-3:]  # Show last 3
+            output.append("  Recent Commits:")
+            for commit in recent_commits:
+                short_hash = commit["hash"][:8]
+                timestamp = commit["timestamp"][:10]
+                output.append(f"    {short_hash} ({timestamp})")
+
+        output.append("")
+        return output, commit_count
+
+    def _calculate_overall_stats(self, total_ai_commits: int) -> List[str]:
+        """Calculate and format overall repository statistics"""
+        output = []
+
+        # Get total regular commits for comparison
+        total_commits_result = self.git_ai.run_git_command(
+            ["rev-list", "--count", "HEAD"]
+        )
+
+        if total_commits_result.returncode == 0:
+            total_commits = int(total_commits_result.stdout.strip())
+            human_commits = total_commits - total_ai_commits
+            ai_percentage = (
+                (total_ai_commits / total_commits * 100) if total_commits > 0 else 0
+            )
+
+            output.append(f"Total Human Commits: {human_commits}")
+            output.append(f"AI Contribution: {ai_percentage:.1f}%")
+
+        return output
+
     def show_ai_statistics(self) -> str:
         """Show statistics about AI contributions"""
-        config = self.git_ai._load_config()
+        config = self.git_ai.load_config()
 
         if not config or "ai_systems" not in config:
             return "No AI tracking data available"
@@ -337,42 +423,15 @@ class TreeVisualizer:
         total_ai_commits = 0
 
         for session_id, ai_system in config["ai_systems"].items():
-            output.append(f"AI System: {ai_system['name']}")
-            output.append(f"  Session ID: {session_id}")
-            output.append(f"  Created: {ai_system['created'][:10]}")
-
-            stats = ai_system.get("stats", {})
-            commit_count = stats.get("total_commits", 0)
+            system_output, commit_count = self._format_ai_system_stats(session_id, ai_system)
+            output.extend(system_output)
             total_ai_commits += commit_count
-
-            output.append(f"  Total Commits: {commit_count}")
-
-            if commit_count > 0:
-                recent_commits = stats.get("commits", [])[-3:]  # Show last 3
-                output.append("  Recent Commits:")
-                for commit in recent_commits:
-                    short_hash = commit["hash"][:8]
-                    timestamp = commit["timestamp"][:10]
-                    output.append(f"    {short_hash} ({timestamp})")
-
-            output.append("")
 
         # Overall statistics
         output.append(f"Total AI Systems: {len(config['ai_systems'])}")
         output.append(f"Total AI Commits: {total_ai_commits}")
 
-        # Get total regular commits for comparison
-        total_commits_result = self.git_ai._run_git_command(
-            ["rev-list", "--count", "HEAD"]
-        )
-        if total_commits_result.returncode == 0:
-            total_commits = int(total_commits_result.stdout.strip())
-            human_commits = total_commits - total_ai_commits
-            ai_percentage = (
-                (total_ai_commits / total_commits * 100) if total_commits > 0 else 0
-            )
-
-            output.append(f"Total Human Commits: {human_commits}")
-            output.append(f"AI Contribution: {ai_percentage:.1f}%")
+        overall_stats = self._calculate_overall_stats(total_ai_commits)
+        output.extend(overall_stats)
 
         return "\n".join(output)

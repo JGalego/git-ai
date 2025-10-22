@@ -38,7 +38,13 @@ class GitAI:
             if os.path.exists(os.path.join(current_dir, ".git")):
                 return current_dir
             current_dir = os.path.dirname(current_dir)
-        raise Exception("Not in a git repository")
+        raise ValueError("Not in a git repository")
+
+    def run_git_command(
+        self, command: List[str], capture_output: bool = True
+    ) -> subprocess.CompletedProcess:
+        """Execute a git command and return the result"""
+        return self._run_git_command(command, capture_output)
 
     def _run_git_command(
         self, command: List[str], capture_output: bool = True
@@ -53,13 +59,17 @@ class GitAI:
                 check=False,
             )
             return result
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             print(f"Error running git command: {e}")
             sys.exit(1)
 
     def _ensure_ai_config_dir(self):
         """Ensure the AI configuration directory exists"""
         os.makedirs(self.ai_config_dir, exist_ok=True)
+
+    def load_config(self) -> Dict[str, Any]:
+        """Load AI tracking configuration"""
+        return self._load_config()
 
     def _load_config(self) -> Dict[str, Any]:
         """Load AI tracking configuration"""
@@ -69,11 +79,27 @@ class GitAI:
         with open(self.ai_config_file, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    def save_config(self, config: Dict[str, Any]):
+        """Save AI tracking configuration"""
+        return self._save_config(config)
+
     def _save_config(self, config: Dict[str, Any]):
         """Save AI tracking configuration"""
         self._ensure_ai_config_dir()
         with open(self.ai_config_file, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
+
+    def get_ai_commit_metadata(self, commit_hash: str) -> Optional[Dict[str, Any]]:
+        """Retrieve AI metadata for a commit using git notes"""
+        try:
+            notes_result = self._run_git_command(
+                ["notes", "--ref=ai", "show", commit_hash]
+            )
+            if notes_result.returncode == 0:
+                return json.loads(notes_result.stdout)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return None
 
     def init(self):
         """Initialize AI tracking for this repository"""
@@ -157,9 +183,12 @@ class GitAI:
 
     def show_log(self, ai_only: bool = False, max_count: Optional[int] = None):
         """Show commit history with AI annotations"""
-        # TODO: Implement ai_only filtering
-        _ = ai_only  # Suppress unused argument warning
-        ai_commits = self.tracker.list_ai_commits(limit=max_count)
+        # Filter AI commits if requested
+        if ai_only:
+            ai_commits = self.tracker.list_ai_commits(limit=max_count)
+            ai_commits = [commit for commit in ai_commits if commit.get('ai_metadata')]
+        else:
+            ai_commits = self.tracker.list_ai_commits(limit=max_count)
 
         if not ai_commits:
             print("No AI commits found.")

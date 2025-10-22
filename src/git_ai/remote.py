@@ -25,12 +25,12 @@ class RemoteSync:
         print(f"Setting up AI metadata synchronization with remote '{remote_name}'...")
 
         # Configure git to push/pull AI notes
-        self.git_ai._run_git_command(
+        self.git_ai.run_git_command(
             ["config", f"remote.{remote_name}.push", "+refs/notes/ai:refs/notes/ai"]
         )
 
         # Configure git to fetch AI notes
-        self.git_ai._run_git_command(
+        self.git_ai.run_git_command(
             [
                 "config",
                 f"remote.{remote_name}.fetch",
@@ -39,12 +39,12 @@ class RemoteSync:
         )
 
         # Add AI branches to default push configuration
-        config = self.git_ai._load_config()
+        config = self.git_ai.load_config()
         if config and "settings" in config:
             ai_branch_prefix = config["settings"].get("ai_branch_prefix", "ai/")
 
             # Configure push for AI branches
-            self.git_ai._run_git_command(
+            self.git_ai.run_git_command(
                 [
                     "config",
                     "--add",
@@ -67,7 +67,7 @@ class RemoteSync:
         if force:
             notes_cmd.insert(1, "--force")
 
-        notes_result = self.git_ai._run_git_command(notes_cmd)
+        notes_result = self.git_ai.run_git_command(notes_cmd)
 
         if notes_result.returncode == 0:
             print("✓ AI notes pushed successfully")
@@ -82,7 +82,7 @@ class RemoteSync:
             if force:
                 branch_cmd.insert(1, "--force")
 
-            branch_result = self.git_ai._run_git_command(branch_cmd)
+            branch_result = self.git_ai.run_git_command(branch_cmd)
 
             if branch_result.returncode == 0:
                 print(f"✓ AI branch '{branch}' pushed successfully")
@@ -99,7 +99,7 @@ class RemoteSync:
         print(f"Pulling AI data from remote '{remote_name}'...")
 
         # Fetch all references including AI notes
-        fetch_result = self.git_ai._run_git_command(["fetch", remote_name])
+        fetch_result = self.git_ai.run_git_command(["fetch", remote_name])
 
         if fetch_result.returncode != 0:
             print(f"Error fetching from remote: {fetch_result.stderr}")
@@ -107,7 +107,7 @@ class RemoteSync:
 
         # Pull AI notes
         try:
-            notes_result = self.git_ai._run_git_command(
+            notes_result = self.git_ai.run_git_command(
                 ["notes", "--ref=ai", "merge", f"refs/remotes/{remote_name}/notes/ai"]
             )
 
@@ -115,8 +115,8 @@ class RemoteSync:
                 print("✓ AI notes merged successfully")
             else:
                 print("ℹ No remote AI notes to merge")
-        except:
-            print("ℹ No remote AI notes found")
+        except (subprocess.SubprocessError, OSError):
+            print("ℹ No remote AI notes to merge")
 
         # Pull remote AI branches
         remote_ai_branches = self._get_remote_ai_branches(remote_name)
@@ -125,7 +125,7 @@ class RemoteSync:
             local_branch = remote_branch.replace(f"remotes/{remote_name}/", "")
 
             # Check if local branch exists
-            local_check = self.git_ai._run_git_command(
+            local_check = self.git_ai.run_git_command(
                 ["branch", "--list", local_branch]
             )
 
@@ -133,8 +133,8 @@ class RemoteSync:
                 # Branch exists locally, merge changes
                 current_branch = self._get_current_branch()
 
-                self.git_ai._run_git_command(["checkout", local_branch])
-                merge_result = self.git_ai._run_git_command(["merge", remote_branch])
+                self.git_ai.run_git_command(["checkout", local_branch])
+                merge_result = self.git_ai.run_git_command(["merge", remote_branch])
 
                 if merge_result.returncode == 0:
                     print(f"✓ AI branch '{local_branch}' updated")
@@ -143,10 +143,10 @@ class RemoteSync:
 
                 # Return to original branch
                 if current_branch:
-                    self.git_ai._run_git_command(["checkout", current_branch])
+                    self.git_ai.run_git_command(["checkout", current_branch])
             else:
                 # Create new local branch from remote
-                create_result = self.git_ai._run_git_command(
+                create_result = self.git_ai.run_git_command(
                     ["checkout", "-b", local_branch, remote_branch]
                 )
 
@@ -213,7 +213,7 @@ class RemoteSync:
 
     def _get_local_ai_branches(self) -> List[str]:
         """Get list of local AI branches"""
-        branches_result = self.git_ai._run_git_command(["branch"])
+        branches_result = self.git_ai.run_git_command(["branch"])
 
         ai_branches = []
         for line in branches_result.stdout.strip().split("\n"):
@@ -225,7 +225,7 @@ class RemoteSync:
 
     def _get_remote_ai_branches(self, remote_name: str) -> List[str]:
         """Get list of remote AI branches"""
-        branches_result = self.git_ai._run_git_command(["branch", "-r"])
+        branches_result = self.git_ai.run_git_command(["branch", "-r"])
 
         remote_ai_branches = []
         prefix = f"{remote_name}/ai/"
@@ -239,12 +239,12 @@ class RemoteSync:
 
     def _get_current_branch(self) -> Optional[str]:
         """Get current branch name"""
-        result = self.git_ai._run_git_command(["branch", "--show-current"])
+        result = self.git_ai.run_git_command(["branch", "--show-current"])
         return result.stdout.strip() if result.returncode == 0 else None
 
     def _push_ai_config(self, remote_name: str, force: bool = False):
         """Push AI configuration to a special remote branch"""
-        config = self.git_ai._load_config()
+        config = self.git_ai.load_config()
 
         if not config:
             return
@@ -255,7 +255,7 @@ class RemoteSync:
 
         try:
             # Create or checkout config branch
-            self.git_ai._run_git_command(["checkout", "-B", config_branch])
+            self.git_ai.run_git_command(["checkout", "-B", config_branch])
 
             # Write config to a special file
             config_file = ".git-ai-config.json"
@@ -263,8 +263,8 @@ class RemoteSync:
                 json.dump(config, f, indent=2)
 
             # Commit the config
-            self.git_ai._run_git_command(["add", config_file])
-            self.git_ai._run_git_command(
+            self.git_ai.run_git_command(["add", config_file])
+            self.git_ai.run_git_command(
                 ["commit", "-m", f"AI config update: {datetime.now().isoformat()}"]
             )
 
@@ -273,18 +273,18 @@ class RemoteSync:
             if force:
                 push_cmd.insert(1, "--force")
 
-            push_result = self.git_ai._run_git_command(push_cmd)
+            push_result = self.git_ai.run_git_command(push_cmd)
 
             if push_result.returncode == 0:
                 print("✓ AI configuration pushed successfully")
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError, IOError) as e:
             print(f"⚠ Failed to push AI configuration: {e}")
 
         finally:
             # Return to original branch
             if current_branch:
-                self.git_ai._run_git_command(["checkout", current_branch])
+                self.git_ai.run_git_command(["checkout", current_branch])
 
             # Clean up config file
             config_file_path = os.path.join(self.repo_root, ".git-ai-config.json")
@@ -298,14 +298,14 @@ class RemoteSync:
 
         try:
             # Check if remote config branch exists
-            remote_branches = self.git_ai._run_git_command(["branch", "-r"])
+            remote_branches = self.git_ai.run_git_command(["branch", "-r"])
             remote_config_branch = f"{remote_name}/{config_branch}"
 
             if remote_config_branch not in remote_branches.stdout:
                 return  # No remote config to pull
 
             # Checkout remote config branch
-            self.git_ai._run_git_command(
+            self.git_ai.run_git_command(
                 ["checkout", "-B", config_branch, f"{remote_name}/{config_branch}"]
             )
 
@@ -316,19 +316,19 @@ class RemoteSync:
                     remote_config = json.load(f)
 
                 # Merge with local config
-                local_config = self.git_ai._load_config()
+                local_config = self.git_ai.load_config()
                 merged_config = self._merge_ai_configs(local_config, remote_config)
 
-                self.git_ai._save_config(merged_config)
+                self.git_ai.save_config(merged_config)
                 print("✓ AI configuration merged from remote")
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError, IOError, json.JSONDecodeError) as e:
             print(f"⚠ Failed to pull AI configuration: {e}")
 
         finally:
             # Return to original branch
             if current_branch:
-                self.git_ai._run_git_command(["checkout", current_branch])
+                self.git_ai.run_git_command(["checkout", current_branch])
 
     def _merge_ai_configs(
         self, local_config: Dict[str, Any], remote_config: Dict[str, Any]
@@ -362,7 +362,7 @@ class RemoteSync:
 
         # Check if remote sync is configured
         try:
-            config_check = self.git_ai._run_git_command(
+            config_check = self.git_ai.run_git_command(
                 ["config", f"remote.{remote_name}.push"]
             )
 
@@ -371,7 +371,7 @@ class RemoteSync:
             else:
                 print("✗ Remote sync not configured")
                 print(f"  Run: git ai remote setup {remote_name}")
-        except:
+        except (subprocess.SubprocessError, OSError):
             print("✗ Remote sync not configured")
 
         # Check local vs remote AI branches
@@ -403,16 +403,16 @@ class RemoteSync:
         for branch in self._get_local_ai_branches():
             try:
                 # Get commits ahead of remote
-                ahead_result = self.git_ai._run_git_command(
+                ahead_result = self.git_ai.run_git_command(
                     ["rev-list", f"{remote_name}/{branch}..{branch}"]
                 )
 
                 if ahead_result.returncode == 0:
                     ahead_commits = ahead_result.stdout.strip().split("\n")
                     unpushed.extend([c for c in ahead_commits if c])
-            except:
+            except (subprocess.SubprocessError, OSError):
                 # Branch might not exist on remote yet
-                all_commits = self.git_ai._run_git_command(["rev-list", branch])
+                all_commits = self.git_ai.run_git_command(["rev-list", branch])
 
                 if all_commits.returncode == 0:
                     branch_commits = all_commits.stdout.strip().split("\n")
@@ -422,7 +422,7 @@ class RemoteSync:
 
     def _get_branch_for_commit(self, commit_hash: str) -> str:
         """Get branch name containing a specific commit"""
-        result = self.git_ai._run_git_command(["branch", "--contains", commit_hash])
+        result = self.git_ai.run_git_command(["branch", "--contains", commit_hash])
 
         if result.returncode == 0:
             lines = result.stdout.strip().split("\n")
@@ -437,7 +437,7 @@ class RemoteSync:
         """Check synchronization status of AI notes"""
         try:
             # Check if remote AI notes exist
-            remote_notes_result = self.git_ai._run_git_command(
+            remote_notes_result = self.git_ai.run_git_command(
                 ["ls-remote", remote_name, "refs/notes/ai"]
             )
 
@@ -445,7 +445,7 @@ class RemoteSync:
                 print("\n✓ Remote AI notes found")
 
                 # Check if local notes are up to date
-                local_notes_result = self.git_ai._run_git_command(
+                local_notes_result = self.git_ai.run_git_command(
                     ["rev-parse", "refs/notes/ai"]
                 )
 
@@ -462,5 +462,5 @@ class RemoteSync:
             else:
                 print("\nℹ No remote AI notes found")
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             print(f"\n⚠ Could not check AI notes status: {e}")

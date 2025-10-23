@@ -38,12 +38,26 @@ class AIChangeTracker:
         current_branch_result = self.git_ai.run_git_command(["branch", "--show-current"])
         current_branch = current_branch_result.stdout.strip()
 
-        # Create AI branch if it doesn't exist
-        ai_branch_name = f"{ai_system['branch_prefix']}/{current_branch}"
-        self._ensure_ai_branch(ai_branch_name, current_branch)
-
-        # Switch to AI branch
-        self.git_ai.run_git_command(["checkout", ai_branch_name])
+        # Determine the base branch and AI branch name
+        if current_branch.startswith(ai_system['branch_prefix']):
+            # We're already on an AI branch (including experimental branches)
+            ai_branch_name = current_branch
+            
+            # Extract the original branch from the AI branch name
+            if "_experiment_" in current_branch:
+                # For experimental branches: ai/copilot/main_experiment_feature1 -> main
+                branch_part = current_branch.replace(f"{ai_system['branch_prefix']}/", "")
+                base_branch = branch_part.split("_experiment_")[0]
+            else:
+                # For regular AI branches: ai/copilot/main -> main
+                base_branch = current_branch.replace(f"{ai_system['branch_prefix']}/", "")
+        else:
+            # We're on a human branch, create/switch to AI branch
+            base_branch = current_branch
+            ai_branch_name = f"{ai_system['branch_prefix']}/{current_branch}"
+            self._ensure_ai_branch(ai_branch_name, current_branch)
+            # Switch to AI branch
+            self.git_ai.run_git_command(["checkout", ai_branch_name])
 
         # Add files if specified, otherwise add all changed files
         if files:
@@ -52,7 +66,7 @@ class AIChangeTracker:
         else:
             self.git_ai.run_git_command(["add", "."])
 
-        return current_branch, ai_branch_name
+        return base_branch, ai_branch_name
 
     def _create_ai_metadata(self, params: AIMetadataParams) -> Dict[str, Any]:
         """Create AI metadata dictionary"""
@@ -134,7 +148,7 @@ class AIChangeTracker:
         )
 
         if not branch_check.stdout.strip():
-            # Branch doesn't exist, create it
+            # Branch doesn't exist, create it from the parent branch (not current HEAD)
             print(f"Creating AI branch: {ai_branch_name}")
             self.git_ai.run_git_command(
                 ["checkout", "-b", ai_branch_name, parent_branch]
@@ -232,15 +246,24 @@ class AIChangeTracker:
         """Merge an AI branch back to the target branch"""
         print(f"Merging AI branch '{ai_branch}' into '{target_branch}'...")
 
+        # Verify that the AI branch exists
+        branch_check = self.git_ai.run_git_command(["branch", "--list", ai_branch])
+        if not branch_check.stdout.strip():
+            print(f"Error: AI branch '{ai_branch}' does not exist")
+            return False
+
         # Switch to target branch
-        self.git_ai.run_git_command(["checkout", target_branch])
+        checkout_result = self.git_ai.run_git_command(["checkout", target_branch])
+        if checkout_result.returncode != 0:
+            print(f"Error: Could not checkout target branch '{target_branch}': {checkout_result.stderr}")
+            return False
 
         merge_result = None
         if strategy == "merge":
-            # Standard merge with commit message indicating AI origin
+            # Force a merge commit (no fast-forward) to show proper branching in graph
             merge_message = f"Merge AI changes from {ai_branch}"
             merge_result = self.git_ai.run_git_command(
-                ["merge", ai_branch, "-m", merge_message]
+                ["merge", "--no-ff", ai_branch, "-m", merge_message]
             )
         elif strategy == "squash":
             # Squash merge
@@ -278,9 +301,9 @@ class AIChangeTracker:
 
         if merge_result:
             print(f"✗ Merge failed: {merge_result.stderr}")
+            print("Please resolve conflicts manually and complete the merge.")
         else:
             print("✗ Merge failed: Unknown strategy")
-        print("Please resolve conflicts manually and complete the merge.")
         return False
 
     def get_ai_status(self) -> Dict[str, Any]:
@@ -321,6 +344,7 @@ class AIChangeTracker:
             "initialized": True,
             "current_branch": current_branch,
             "is_ai_branch": is_ai_branch,
+            "is_experiment_branch": "_experiment_" in current_branch,
             "active_session": active_session,
             "active_ai_system": active_ai_system,
             "ai_branches": ai_branches,

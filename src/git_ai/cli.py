@@ -81,6 +81,11 @@ def create_parser():
     track_parser = subparsers.add_parser("track", help="Start tracking an AI system")
     track_parser.add_argument("ai_system", help="Name of the AI system to track")
 
+    # Experiment command for creating experimental AI branches
+    experiment_parser = subparsers.add_parser("experiment", help="Create or switch to experimental AI branch")
+    experiment_parser.add_argument("experiment_name", help="Name of the experiment")
+    experiment_parser.add_argument("--from-commit", help="Start experiment from specific commit hash")
+
     # Commit command
     commit_parser = subparsers.add_parser("commit", help="Commit with AI metadata")
     commit_parser.add_argument("-m", "--message", required=True, help="Commit message")
@@ -196,6 +201,8 @@ def execute_core_commands(git_ai, args):
         git_ai.init()
     elif args.command == "track":
         git_ai.track(args.ai_system)
+    elif args.command == "experiment":
+        git_ai.create_experiment(args.experiment_name, args.from_commit)
     elif args.command == "commit":
         git_ai.commit(args.message, args.ai_prompt, args.ai_model, args.files)
     elif args.command == "status":

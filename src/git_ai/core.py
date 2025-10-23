@@ -128,7 +128,7 @@ class GitAI:
         print("  - AI configuration directory created")
         print("  - Git notes configured for AI metadata")
         print("  - Default settings applied")
-        print("\\nNext steps:")
+        print("\nNext steps:")
         print("  1. Start tracking with: git ai track <ai-system-name>")
         print("  2. Make AI changes and commit with: git ai commit")
 
@@ -160,6 +160,65 @@ class GitAI:
         print(f"  - AI ID: {ai_id}")
         print(f"  - Branch prefix: {config['ai_systems'][ai_id]['branch_prefix']}")
         print("  - Use 'git ai commit' to commit AI changes")
+
+    def create_experiment(self, experiment_name: str, from_commit: Optional[str] = None):
+        """Create a new experimental AI branch"""
+        config = self._load_config()
+
+        if not config or "current_session" not in config:
+            print("Error: No active AI session. Run 'git ai track <ai-system>' first.")
+            return
+
+        current_session = config["current_session"]
+        ai_system = config["ai_systems"][current_session]
+
+        # Get current branch
+        current_branch_result = self._run_git_command(["branch", "--show-current"])
+        current_branch = current_branch_result.stdout.strip()
+
+        # Determine base branch (strip AI prefix if we're on an AI branch)
+        if current_branch.startswith(ai_system["branch_prefix"]):
+            base_branch = current_branch.replace(f"{ai_system['branch_prefix']}/", "").split("/")[0]
+        else:
+            base_branch = current_branch
+
+        # Create experiment branch name - use underscore instead of nested path
+        experiment_branch = f"{ai_system['branch_prefix']}/{base_branch}_experiment_{experiment_name}"
+
+        # Determine starting point - for true branching, start from a common base
+        if from_commit:
+            start_point = from_commit
+        else:
+            # If we're on an AI branch, start the experiment from the original base branch
+            # to create proper branching topology
+            if current_branch.startswith(ai_system["branch_prefix"]):
+                start_point = base_branch  # Start from the human branch
+            else:
+                start_point = current_branch
+
+        # Create and switch to experiment branch
+        create_result = self._run_git_command(["checkout", "-b", experiment_branch, start_point])
+
+        if create_result.returncode == 0:
+            print(f"✓ Created experimental branch: {experiment_branch}")
+            print(f"  - Based on: {start_point}")
+            print(f"  - AI System: {ai_system['name']}")
+            print("  - Use 'git ai commit' to make experimental changes")
+            
+            # Update config to track this experiment
+            if "experiments" not in config["ai_systems"][current_session]:
+                config["ai_systems"][current_session]["experiments"] = {}
+                
+            config["ai_systems"][current_session]["experiments"][experiment_name] = {
+                "branch": experiment_branch,
+                "created": datetime.now().isoformat(),
+                "base_commit": start_point,
+                "active": True
+            }
+            
+            self._save_config(config)
+        else:
+            print(f"Error creating experiment branch: {create_result.stderr}")
 
     def commit(
         self,
@@ -198,7 +257,7 @@ class GitAI:
         print("=" * 50)
 
         for commit in ai_commits:
-            print(f"\\nCommit: {commit['hash'][:8]}")
+            print(f"\nCommit: {commit['hash'][:8]}")
             print(f"Date: {commit['date']}")
             print(f"Author: {commit['author']}")
             print(f"Message: {commit['subject']}")
@@ -241,24 +300,27 @@ class GitAI:
         print(f"Current Branch: {status['current_branch']}")
 
         if status["is_ai_branch"]:
-            print("📍 Currently on an AI branch")
+            if status.get("is_experiment_branch"):
+                print("🧪 Currently on an experimental AI branch")
+            else:
+                print("📍 Currently on an AI branch")
         else:
             print("📍 Currently on a human branch")
 
         if status["active_ai_system"]:
             ai_sys = status["active_ai_system"]
-            print(f"\\nActive AI System: {ai_sys['name']}")
+            print(f"\nActive AI System: {ai_sys['name']}")
             print(f"Session ID: {status['active_session']}")
             print(f"Branch Prefix: {ai_sys['branch_prefix']}")
         else:
-            print("\\nNo active AI session")
+            print("\nNo active AI session")
             print("Use 'git ai track <ai-system>' to start tracking")
 
-        print(f"\\nAI Systems: {status['ai_systems_count']}")
+        print(f"\nAI Systems: {status['ai_systems_count']}")
         print(f"AI Branches: {len(status['ai_branches'])}")
 
         if status["recent_ai_commits"]:
-            print("\\nRecent AI Commits:")
+            print("\nRecent AI Commits:")
             for commit in status["recent_ai_commits"][:3]:
                 ai_sys = commit["ai_metadata"].get("ai_system", "Unknown")
                 print(f"  {commit['hash'][:8]} - {commit['subject']} [{ai_sys}]")

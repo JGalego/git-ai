@@ -140,20 +140,113 @@ class TreeVisualizer:
         max_commits: int = 20,
         show_ai_only: bool = False,
     ) -> str:
-        """Display commit tree with AI annotations"""
-        chars = self.tree_chars[format_type]
+        """Display commit tree with AI annotations - clean git log style"""
+        
+        # Build git log command for a clean tree view
+        log_cmd = [
+            "log",
+            "--graph",
+            "--format=%H|%s|%an|%ad",
+            "--date=short",
+            f"-n{max_commits}",
+        ]
 
-        # Get commit history with graph
-        log_cmd = self._build_log_command(branch, max_commits)
+        if branch:
+            log_cmd.append(branch)
+        else:
+            log_cmd.append("--all")
+
         log_result = self.git_ai.run_git_command(log_cmd)
+
 
         if log_result.returncode != 0:
             return "Error retrieving commit history"
 
         lines = log_result.stdout.strip().split("\n")
-        tree_output = self._process_tree_lines(lines, chars, show_ai_only)
+        tree_output = []
+
+        for line in lines:
+            if not line.strip():
+                continue
+                
+            # Parse the line to separate graph from commit info
+            formatted_line = self._format_clean_commit_line(line, format_type, show_ai_only)
+            if formatted_line:
+                tree_output.append(formatted_line)
 
         return "\n".join(tree_output)
+
+    def _format_clean_commit_line(self, line: str, format_type: str, show_ai_only: bool) -> Optional[str]:
+        """Format a commit line in clean git log style with AI markers"""
+
+        # Find branch (|/ or \|) and merge (|\ or /|) lines and return them as is
+        if re.match(r"^[\s\|\*/\\]+$", line):
+            return line
+
+        # Find the commit hash in the line
+        match = re.search(r"([a-f0-9]{40})", line)
+        if not match:
+            return None
+            
+        # Split into graph part and commit info
+        graph_part = line[:match.start()]
+        commit_part = line[match.start():]
+        
+        # Parse commit information
+        commit_info_parts = commit_part.split("|")
+        if len(commit_info_parts) < 4:
+            return None
+            
+        commit_hash, subject, author, date = commit_info_parts[:4]
+        short_hash = commit_hash[:8]
+        
+        # Check for AI metadata
+        ai_metadata = self._get_ai_metadata(commit_hash)
+        
+        # Skip non-AI commits if show_ai_only is True
+        if show_ai_only and not ai_metadata:
+            return None
+            
+        # Choose marker and color based on commit type
+        if ai_metadata:
+            if format_type == "unicode":
+                marker = "🤖"
+            else:
+                marker = "[AI]"
+            color_code = "\033[36m"  # Cyan for AI commits
+        else:
+            if format_type == "unicode":
+                marker = "👤"
+            else:
+                marker = "[H]"
+            color_code = "\033[32m"  # Green for human commits
+            
+        reset_color = "\033[0m"
+        
+        # Build the clean formatted line
+        formatted_line = f"{graph_part}{color_code}{marker} {short_hash}{reset_color} {subject}"
+        
+        # Add author and date in gray
+        formatted_line += f" \033[90m({author}, {date})\033[0m"
+        
+        # Add concise AI info if available
+        if ai_metadata:
+            ai_info_parts = []
+            if "ai_system" in ai_metadata:
+                ai_info_parts.append(f"AI: {ai_metadata['ai_system']}")
+            if "ai_model" in ai_metadata:
+                ai_info_parts.append(f"Model: {ai_metadata['ai_model']}")
+            if "ai_prompt" in ai_metadata:
+                # Truncate long prompts
+                prompt = ai_metadata['ai_prompt']
+                if len(prompt) > 30:
+                    prompt = prompt[:27] + "..."
+                ai_info_parts.append(f"Prompt: {prompt}")
+                
+            if ai_info_parts:
+                formatted_line += f" \033[33m[{', '.join(ai_info_parts)}]\033[0m"
+        
+        return formatted_line
 
     def _extract_commit_hash(self, line: str) -> Optional[str]:
         """Extract commit hash from git log line"""
@@ -398,9 +491,13 @@ class TreeVisualizer:
 
         if total_commits_result.returncode == 0:
             total_commits = int(total_commits_result.stdout.strip())
-            human_commits = total_commits - total_ai_commits
+            
+            # Count actual AI commits by checking git notes
+            actual_ai_commits = len(self.git_ai.tracker.list_ai_commits())
+            
+            human_commits = total_commits - actual_ai_commits
             ai_percentage = (
-                (total_ai_commits / total_commits * 100) if total_commits > 0 else 0
+                (actual_ai_commits / total_commits * 100) if total_commits > 0 else 0
             )
 
             output.append(f"Total Human Commits: {human_commits}")
@@ -428,10 +525,12 @@ class TreeVisualizer:
             total_ai_commits += commit_count
 
         # Overall statistics
+        actual_ai_commits = len(self.git_ai.tracker.list_ai_commits())
         output.append(f"Total AI Systems: {len(config['ai_systems'])}")
-        output.append(f"Total AI Commits: {total_ai_commits}")
-
-        overall_stats = self._calculate_overall_stats(total_ai_commits)
+        output.append(f"Total AI Commits: {actual_ai_commits}")
+        
+        # Calculate real statistics
+        overall_stats = self._calculate_overall_stats(actual_ai_commits)
         output.extend(overall_stats)
-
+        
         return "\n".join(output)

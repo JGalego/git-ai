@@ -6,7 +6,6 @@ A Git extension that tracks and visualizes changes made by AI systems as separat
 
 <img src="git-ai.jpg" alt="Git AI Visualization" title="&#34;It's like comparing apples and oranges; they're both delicious&#34; - Cyd Charisse" width="50%"/>
 
-
 ## Warning ⚠️
 
 **This extension is highly experimental and under active development.** The developers take no responsibility for any damages, data loss, or repository corruption that may occur when using this software on real-life repositories.
@@ -100,6 +99,7 @@ git ai stats
 ## Team Collaboration
 
 ### Setup for Team
+
 ```bash
 # Repository owner
 git ai init

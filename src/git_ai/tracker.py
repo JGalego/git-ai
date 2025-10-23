@@ -42,7 +42,7 @@ class AIChangeTracker:
         if current_branch.startswith(ai_system['branch_prefix']):
             # We're already on an AI branch (including experimental branches)
             ai_branch_name = current_branch
-            
+
             # Extract the original branch from the AI branch name
             if "_experiment_" in current_branch:
                 # For experimental branches: ai/copilot/main_experiment_feature1 -> main
@@ -255,7 +255,10 @@ class AIChangeTracker:
         # Switch to target branch
         checkout_result = self.git_ai.run_git_command(["checkout", target_branch])
         if checkout_result.returncode != 0:
-            print(f"Error: Could not checkout target branch '{target_branch}': {checkout_result.stderr}")
+            print(
+                f"Error: Could not checkout target branch '{target_branch}': "
+                f"{checkout_result.stderr}"
+            )
             return False
 
         merge_result = None

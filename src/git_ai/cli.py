@@ -82,9 +82,13 @@ def create_parser():
     track_parser.add_argument("ai_system", help="Name of the AI system to track")
 
     # Experiment command for creating experimental AI branches
-    experiment_parser = subparsers.add_parser("experiment", help="Create or switch to experimental AI branch")
+    experiment_parser = subparsers.add_parser(
+        "experiment", help="Create or switch to experimental AI branch"
+    )
     experiment_parser.add_argument("experiment_name", help="Name of the experiment")
-    experiment_parser.add_argument("--from-commit", help="Start experiment from specific commit hash")
+    experiment_parser.add_argument(
+        "--from-commit", help="Start experiment from specific commit hash"
+    )
 
     # Commit command
     commit_parser = subparsers.add_parser("commit", help="Commit with AI metadata")

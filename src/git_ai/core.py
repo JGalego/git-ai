@@ -183,7 +183,9 @@ class GitAI:
             base_branch = current_branch
 
         # Create experiment branch name - use underscore instead of nested path
-        experiment_branch = f"{ai_system['branch_prefix']}/{base_branch}_experiment_{experiment_name}"
+        experiment_branch = (
+            f"{ai_system['branch_prefix']}/{base_branch}_experiment_{experiment_name}"
+        )
 
         # Determine starting point - for true branching, start from a common base
         if from_commit:
@@ -204,18 +206,18 @@ class GitAI:
             print(f"  - Based on: {start_point}")
             print(f"  - AI System: {ai_system['name']}")
             print("  - Use 'git ai commit' to make experimental changes")
-            
+
             # Update config to track this experiment
             if "experiments" not in config["ai_systems"][current_session]:
                 config["ai_systems"][current_session]["experiments"] = {}
-                
+
             config["ai_systems"][current_session]["experiments"][experiment_name] = {
                 "branch": experiment_branch,
                 "created": datetime.now().isoformat(),
                 "base_commit": start_point,
                 "active": True
             }
-            
+
             self._save_config(config)
         else:
             print(f"Error creating experiment branch: {create_result.stderr}")

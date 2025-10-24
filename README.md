@@ -4,7 +4,7 @@ A Git extension that tracks and visualizes changes made by AI systems as separat
 
 > *Because sometimes you need to track who's doing the **actual** thinking in your codebase.*
 
-<img src="git-ai.jpg" alt="Git AI Visualization" title="&#34;It's like comparing apples and oranges; they're both delicious&#34; - Cyd Charisse" width="50%"/>
+<img src="https://github.com/JGalego/git-ai/blob/main/git-ai.jpg?raw=true" alt="Git AI Visualization" title="&#34;It's like comparing apples and oranges; they're both delicious&#34; - Cyd Charisse" width="50%"/>
 
 ## Warning ⚠️
 
@@ -28,7 +28,7 @@ A Git extension that tracks and visualizes changes made by AI systems as separat
 ### From PyPI (recommended)
 
 ```bash
-pip install git-ai
+pip install git-ai-tracker
 ```
 
 ### From Source
@@ -239,7 +239,7 @@ git ai remote-status origin
 
 ### Common Issues
 
-- **"git-ai command not found"**: Check if package is installed (`pip list | grep git-ai`)
+- **"git-ai command not found"**: Check if package is installed (`pip list | grep git-ai-tracker`)
 - **"No active AI session"**: Run `git ai track "Your AI System"`
 - **"Not a git repository"**: Run commands from within a Git repository
 - **Remote sync not working**: Use standard `git` commands for notes and branches
